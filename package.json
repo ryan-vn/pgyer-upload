@@ -17,11 +17,13 @@
     "dotenv": "^17.2.3",
     "form-data": "^4.0.4",
     "inquirer": "^12.10.0",
+    "nodemailer": "^7.0.10",
     "ora": "^9.0.0"
   },
   "devDependencies": {
     "@oclif/prettier-config": "^0.2.1",
     "@types/node": "^18",
+    "@types/nodemailer": "^7.0.3",
     "eslint": "^9",
     "eslint-config-oclif": "^6",
     "eslint-config-prettier": "^10",
@@ -67,6 +69,7 @@
   "scripts": {
     "build": "shx rm -rf dist && tsc -b",
     "dev": "ts-node --esm ./bin/dev.js",
+    "watch": "tsc -b -w",
     "start": "node ./bin/run.js",
     "lint": "eslint",
     "postpack": "shx rm -f oclif.manifest.json",

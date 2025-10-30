@@ -4,5 +4,19 @@
   "type": "1",
   "password": "",
   "desc": "Uploaded via pgyer-upload CLI",
-  "json": false
+  "json": false,
+  "email": {
+    "enabled": false,
+    "host": "smtp.example.com",
+    "port": 465,
+    "secure": true,
+    "user": "no-reply@example.com",
+    "pass": "your_password",
+    "from": "PGYER Bot <no-reply@example.com>",
+    "to": ["dev1@example.com", "dev2@example.com"],
+    "cc": ["pm@example.com"],
+    "subject": "New Build Uploaded",
+    "text": "A new build is ready for installation.",
+    "html": "<p>A new build is ready: <a href='{{installUrl}}'>Install</a></p>"
+  }
 }

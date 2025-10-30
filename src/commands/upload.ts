@@ -7,6 +7,7 @@ import ora from "ora";
 import chalk from "chalk";
 import dotenv from "dotenv";
 import inquirer from "inquirer";
+import nodemailer from "nodemailer";
 
 const API_BASE_URL = "http://api.pgyer.com/apiv2";
 
@@ -17,6 +18,20 @@ interface UploadConfig {
   password?: string;
   desc?: string;
   json?: boolean;
+  email?: {
+    enabled?: boolean;
+    host: string;
+    port: number;
+    secure?: boolean;
+    user?: string;
+    pass?: string;
+    from: string;
+    to: string | string[];
+    cc?: string | string[];
+    subject?: string;
+    text?: string;
+    html?: string;
+  };
 }
 
 export default class Upload extends Command {
@@ -107,6 +122,75 @@ export default class Upload extends Command {
         message: 'Build description:',
         default: 'Uploaded via pgyer-upload CLI'
       },
+      // Email enable switch
+      {
+        type: 'confirm',
+        name: 'emailEnabled',
+        message: 'Enable email notification after upload?',
+        default: false,
+      },
+      // Email settings (conditional)
+      {
+        type: 'input',
+        name: 'emailHost',
+        message: 'SMTP host (e.g. smtp.example.com):',
+        when: (a:any) => a.emailEnabled,
+        validate: (v:string) => v ? true : 'Required',
+      },
+      {
+        type: 'number',
+        name: 'emailPort',
+        message: 'SMTP port (e.g. 465):',
+        default: 465,
+        when: (a:any) => a.emailEnabled,
+      },
+      {
+        type: 'confirm',
+        name: 'emailSecure',
+        message: 'Use TLS (secure)?',
+        default: true,
+        when: (a:any) => a.emailEnabled,
+      },
+      {
+        type: 'input',
+        name: 'emailUser',
+        message: 'SMTP user (leave empty if not required):',
+        when: (a:any) => a.emailEnabled,
+      },
+      {
+        type: 'password',
+        name: 'emailPass',
+        message: 'SMTP password (leave empty if not required):',
+        mask: '*',
+        when: (a:any) => a.emailEnabled,
+      },
+      {
+        type: 'input',
+        name: 'emailFrom',
+        message: 'From (e.g. PGYER Bot <no-reply@example.com>):',
+        when: (a:any) => a.emailEnabled,
+        validate: (v:string) => v ? true : 'Required',
+      },
+      {
+        type: 'input',
+        name: 'emailTo',
+        message: 'To (comma separated emails):',
+        when: (a:any) => a.emailEnabled,
+        validate: (v:string) => v ? true : 'Required',
+      },
+      {
+        type: 'input',
+        name: 'emailCc',
+        message: 'CC (optional, comma separated):',
+        when: (a:any) => a.emailEnabled,
+      },
+      {
+        type: 'input',
+        name: 'emailSubject',
+        message: 'Email subject (optional):',
+        default: 'New Build Uploaded',
+        when: (a:any) => a.emailEnabled,
+      },
       {
         type: 'confirm',
         name: 'json',
@@ -127,7 +211,29 @@ export default class Upload extends Command {
       type: answers.type,
       password: answers.password,
       desc: answers.desc,
-      json: answers.json
+      json: answers.json,
+      email: answers.emailEnabled
+        ? {
+            enabled: true,
+            host: answers.emailHost,
+            port: Number(answers.emailPort) || 465,
+            secure: Boolean(answers.emailSecure),
+            user: answers.emailUser || undefined,
+            pass: answers.emailPass || undefined,
+            from: answers.emailFrom,
+            to: String(answers.emailTo)
+              .split(',')
+              .map((s:string)=>s.trim())
+              .filter(Boolean),
+            cc: answers.emailCc
+              ? String(answers.emailCc)
+                  .split(',')
+                  .map((s:string)=>s.trim())
+                  .filter(Boolean)
+              : undefined,
+            subject: answers.emailSubject,
+          }
+        : undefined,
     };
 
     if (answers.saveConfig) {
@@ -146,6 +252,37 @@ export default class Upload extends Command {
     } catch (error) {
       this.log(chalk.red(`❌ Error saving config: ${error}`));
     }
+  }
+
+  private async sendEmailNotification(emailCfg: UploadConfig["email"], buildInfo: any): Promise<void> {
+    if (!emailCfg || emailCfg.enabled === false) return;
+
+    const transporter = nodemailer.createTransport({
+      host: emailCfg.host,
+      port: emailCfg.port,
+      secure: Boolean(emailCfg.secure),
+      auth: emailCfg.user && emailCfg.pass ? { user: emailCfg.user, pass: emailCfg.pass } : undefined,
+    } as any);
+
+    const toList = Array.isArray(emailCfg.to) ? emailCfg.to.join(",") : emailCfg.to;
+    const ccList = emailCfg.cc ? (Array.isArray(emailCfg.cc) ? emailCfg.cc.join(",") : emailCfg.cc) : undefined;
+
+    const subject = emailCfg.subject || `PGYER Upload: ${buildInfo?.buildName || "Build"}`;
+    const installUrl = buildInfo?.buildShortcutUrl ? `https://www.pgyer.com/${buildInfo.buildShortcutUrl}` : "";
+    const defaultText = `Upload Successful\n\nApp: ${buildInfo?.buildName || "-"}\nVersion: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})\nInstall: ${installUrl}`;
+    const text = emailCfg.text || defaultText;
+    const html = emailCfg.html || `<p>Upload Successful</p><p>App: <b>${buildInfo?.buildName || "-"}</b></p><p>Version: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})</p><p>Install: <a href="${installUrl}">${installUrl}</a></p>`;
+
+    await transporter.sendMail({
+      from: emailCfg.from,
+      to: toList,
+      cc: ccList,
+      subject,
+      text,
+      html,
+    });
+
+    this.log(chalk.green("📧 Email notification sent"));
   }
 
   private getConfigPath(configPath?: string): string {
@@ -168,45 +305,94 @@ export default class Upload extends Command {
 
   private async initProjectConfig(): Promise<void> {
     const configPath = path.join(process.cwd(), '.env');
-    
-    if (fs.existsSync(configPath)) {
+    // 检测一次项目信息，供 .env 及 email 默认值使用
+    const projectInfo = await this.detectProjectType();
+    const envExists = fs.existsSync(configPath);
+    if (envExists) {
       this.log(chalk.yellow(`⚠️  Configuration file already exists: ${configPath}`));
-      this.log(chalk.yellow('Use --force to overwrite existing configuration.'));
-      return;
+      this.log(chalk.gray('Skipping .env creation and continuing to optional email setup...'));
+    } else {
+      // 写入 .env
+      
+      const config = {
+        '# PGYER Upload Configuration': '',
+        'PGYER_API_KEY': 'your_api_key_here',
+        'PGYER_BUILD_PATH': projectInfo.buildPath || 'path/to/your/build/file',
+        'PGYER_DEFAULT_TYPE': '1',
+        'PGYER_DEFAULT_PASSWORD': '',
+        'PGYER_DEFAULT_DESC': projectInfo.description || 'Uploaded via pgyer-upload CLI',
+        '': '',
+        '# Project Info': `# Detected: ${projectInfo.type}`,
+        '# Build path': `# ${projectInfo.buildPath || 'Not found'}`,
+        '# Common paths': `# ${projectInfo.commonPaths.join(', ')}`
+      };
+
+      const configContent = Object.entries(config)
+        .map(([key, value]) => {
+          if (key.startsWith('#')) {
+            return value ? `${key} ${value}` : key;
+          }
+          return value ? `${key}=${value}` : '';
+        })
+        .join('\n');
+
+      fs.writeFileSync(configPath, configContent);
+      
+      this.log(chalk.green(`\n✅ Project configuration created: ${configPath}`));
+      this.log(chalk.blue('\n📝 Next steps:'));
+      this.log(chalk.gray('1. Edit .env file and set your PGYER_API_KEY'));
+      this.log(chalk.gray('2. Update PGYER_BUILD_PATH if needed'));
+      this.log(chalk.gray('3. Run: pgyer-upload upload'));
     }
 
-    // 自动检测项目类型和构建文件
-    const projectInfo = await this.detectProjectType();
-    
-    const config = {
-      '# PGYER Upload Configuration': '',
-      'PGYER_API_KEY': 'your_api_key_here',
-      'PGYER_BUILD_PATH': projectInfo.buildPath || 'path/to/your/build/file',
-      'PGYER_DEFAULT_TYPE': '1',
-      'PGYER_DEFAULT_PASSWORD': '',
-      'PGYER_DEFAULT_DESC': projectInfo.description || 'Uploaded via pgyer-upload CLI',
-      '': '',
-      '# Project Info': `# Detected: ${projectInfo.type}`,
-      '# Build path': `# ${projectInfo.buildPath || 'Not found'}`,
-      '# Common paths': `# ${projectInfo.commonPaths.join(', ')}`
-    };
+    // Optional: initialize upload_config.json with email settings
+    const { setupEmail } = await inquirer.prompt([
+      {
+        type: 'confirm',
+        name: 'setupEmail',
+        message: 'Do you want to configure email notifications now?',
+        default: false,
+      },
+    ]);
 
-    const configContent = Object.entries(config)
-      .map(([key, value]) => {
-        if (key.startsWith('#')) {
-          return value ? `${key} ${value}` : key;
-        }
-        return value ? `${key}=${value}` : '';
-      })
-      .join('\n');
+    if (setupEmail) {
+      const emailAnswers = await inquirer.prompt([
+        { type: 'input', name: 'host', message: 'SMTP host (e.g. smtp.example.com):', validate: (v:string)=>v?true:'Required' },
+        { type: 'number', name: 'port', message: 'SMTP port (e.g. 465):', default: 465 },
+        { type: 'confirm', name: 'secure', message: 'Use TLS (secure)?', default: true },
+        { type: 'input', name: 'user', message: 'SMTP user (leave empty if not required):' },
+        { type: 'password', name: 'pass', message: 'SMTP password (leave empty if not required):', mask: '*' },
+        { type: 'input', name: 'from', message: 'From (e.g. PGYER Bot <no-reply@example.com>):', validate: (v:string)=>v?true:'Required' },
+        { type: 'input', name: 'to', message: 'To (comma separated emails):', validate: (v:string)=>v?true:'Required' },
+        { type: 'input', name: 'cc', message: 'CC (optional, comma separated):' },
+        { type: 'input', name: 'subject', message: 'Subject (optional):', default: 'New Build Uploaded' },
+      ]);
 
-    fs.writeFileSync(configPath, configContent);
-    
-    this.log(chalk.green(`\n✅ Project configuration created: ${configPath}`));
-    this.log(chalk.blue('\n📝 Next steps:'));
-    this.log(chalk.gray('1. Edit .env file and set your PGYER_API_KEY'));
-    this.log(chalk.gray('2. Update PGYER_BUILD_PATH if needed'));
-    this.log(chalk.gray('3. Run: pgyer-upload upload'));
+      const uploadJsonPath = path.join(process.cwd(), 'upload_config.json');
+      const uploadJson = {
+        pgyapikey: 'your_api_key_here',
+        filepath: projectInfo.buildPath || 'path/to/your/build/file',
+        type: '1',
+        password: '',
+        desc: 'Uploaded via pgyer-upload CLI',
+        json: false,
+        email: {
+          enabled: true,
+          host: emailAnswers.host,
+          port: Number(emailAnswers.port) || 465,
+          secure: Boolean(emailAnswers.secure),
+          user: emailAnswers.user || undefined,
+          pass: emailAnswers.pass || undefined,
+          from: emailAnswers.from,
+          to: (emailAnswers.to as string).split(',').map(s=>s.trim()).filter(Boolean),
+          cc: (emailAnswers.cc as string)?.split(',').map(s=>s.trim()).filter(Boolean) || undefined,
+          subject: emailAnswers.subject,
+        },
+      };
+
+      fs.writeFileSync(uploadJsonPath, JSON.stringify(uploadJson, null, 2));
+      this.log(chalk.green(`✅ Email config created: ${uploadJsonPath}`));
+    }
   }
 
   private async detectProjectType(): Promise<{type: string, buildPath: string | null, description: string, commonPaths: string[]}> {
@@ -476,6 +662,15 @@ export default class Upload extends Command {
 
       if (json) {
         this.log(JSON.stringify(buildInfo, null, 2));
+      }
+
+      // Optional email notification
+      if (uploadConfig.email?.enabled) {
+        try {
+          await this.sendEmailNotification(uploadConfig.email, buildInfo);
+        } catch (e: any) {
+          this.log(chalk.yellow(`⚠️ Email send failed: ${e.message || e}`));
+        }
       }
 
     } catch (err: any) {
