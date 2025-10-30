@@ -20,7 +20,7 @@ $ npm install -g pgyer-upload
 $ pgyer-upload COMMAND
 running command...
 $ pgyer-upload (--version)
-pgyer-upload/0.0.1 darwin-arm64 node-v22.15.0
+pgyer-upload/0.0.1 linux-x64 node-v20.19.5
 $ pgyer-upload --help [COMMAND]
 USAGE
   $ pgyer-upload COMMAND
@@ -350,32 +350,4 @@ DESCRIPTION
 ```
 
 _See code: [@oclif/plugin-plugins](https://github.com/oclif/plugin-plugins/blob/v5.4.51/src/commands/plugins/update.ts)_
-
-## `pgyer-upload upload [FILE]`
-
-Upload iOS / Android / HarmonyOS builds to PGYER
-
-```
-USAGE
-  $ pgyer-upload upload [FILE] [-k <value>] [-t <value>] [-p <value>] [-d <value>] [-j] [-c <value>] [-i]
-    [-a]
-
-ARGUMENTS
-  [FILE]  ipa/apk/hap file path (optional if configured)
-
-FLAGS
-  -a, --auto              Auto-detect build files
-  -c, --config=<value>    Path to config file (.env)
-  -d, --desc=<value>      Build update description
-  -i, --init              Initialize project configuration
-  -j, --json              Output full JSON response
-  -k, --apiKey=<value>    PGYER API Key
-  -p, --password=<value>  Install password if type=2
-  -t, --type=<value>      Install type (1=public,2=password,3=invite)
-
-DESCRIPTION
-  Upload iOS / Android / HarmonyOS builds to PGYER
-```
-
-_See code: [src/commands/upload.ts](https://github.com/cli/pgyer-upload/blob/v0.0.1/src/commands/upload.ts)_
 <!-- commandsstop -->
