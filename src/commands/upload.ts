@@ -310,12 +310,15 @@ export default class Upload extends Command {
 
     const subject = emailCfg.subject || `PGYER Upload: ${buildInfo?.buildName || "Build"}`;
     const installUrl = buildInfo?.buildShortcutUrl ? `https://www.pgyer.com/${buildInfo.buildShortcutUrl}` : "";
+    const buildKey = buildInfo?.buildKey || "";
+    const buildKeyOnly = typeof buildKey === 'string' ? buildKey.replace(/\.[^.]+$/, '') : '';
+    const qrCodeUrl = buildKeyOnly ? `https://www.pgyer.com/app/qrcode/${buildKeyOnly}` : "";
     const envLabel = buildInfo?.__env as string | undefined;
     const notes = buildInfo?.__notes as string | undefined;
 
-    const defaultText = `Upload Successful\n\nApp: ${buildInfo?.buildName || "-"}\nVersion: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})\nEnvironment: ${envLabel || '-'}\nNotes: ${notes || '-'}\nInstall: ${installUrl}\nVersion Hash: ${buildInfo?.buildKey || '-'}\nBuild Key: ${buildInfo?.buildKey || '-'}`;
+    const defaultText = `Upload Successful\n\nApp: ${buildInfo?.buildName || "-"}\nVersion: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})\nEnvironment: ${envLabel || '-'}\nNotes: ${notes || '-'}\nInstall: ${installUrl}\nBuild Key: ${buildKey || '-'}`;
 
-    const variables = {installUrl, env: envLabel || '', notes: notes || '', desc: buildInfo?.__desc || '', appName: buildInfo?.buildName || '-', version: buildInfo?.buildVersion || '-', buildNo: buildInfo?.buildVersionNo || '-' } as Record<string,string>;
+    const variables = {installUrl, buildKey, qrCodeUrl, env: envLabel || '', notes: notes || '', desc: buildInfo?.__desc || '', appName: buildInfo?.buildName || '-', version: buildInfo?.buildVersion || '-', buildNo: buildInfo?.buildVersionNo || '-' } as Record<string,string>;
     const text = emailCfg.text ? this.interpolate(emailCfg.text, variables) : defaultText;
     const html = emailCfg.html 
       ? this.interpolate(emailCfg.html, variables)
@@ -324,7 +327,8 @@ export default class Upload extends Command {
          ${envLabel ? `<p>Environment: ${envLabel}</p>` : ''}
          ${notes ? `<p>Notes: ${notes}</p>` : ''}
          <p>Install: <a href="${installUrl}">${installUrl}</a></p>
-         ${buildInfo?.buildKey ? `<p>Version Hash: ${buildInfo.buildKey}</p>` : ''}`;
+         ${buildKey ? `<p>Build Key: ${buildKey}</p>` : ''}
+         ${qrCodeUrl ? `<p><strong>扫码下载:</strong><br/><img src="${qrCodeUrl}" alt="QR Code" style="width:200px;height:200px;"/></p>` : ''}`;
 
     await transporter.sendMail({
       from: emailCfg.from,
@@ -779,7 +783,7 @@ ${ignoreEntry}\n`);
       const data = tokenRes.data.data;
       if (!data) throw new Error("Failed to get upload token");
 
-      spinner.text = "Uploading file...";
+      spinner.stop();
 
       // Some PGYER responses wrap fields under data.params; support both shapes
       const params = (data as any).params ?? {};
@@ -799,19 +803,45 @@ ${ignoreEntry}\n`);
       form.append("x-cos-meta-file-name", file.split("/").pop());
       form.append("file", fs.createReadStream(file));
 
+      // 获取文件大小用于进度计算
+      const fileStats = fs.statSync(file);
+      const totalSize = fileStats.size;
+      let uploadedSize = 0;
+      const startTime = Date.now();
+
+      this.log(chalk.blue(`📤 Uploading ${path.basename(file)} (${(totalSize / 1024 / 1024).toFixed(2)} MB)...\n`));
+
       // 使用正确的 COS 上传方式（参考官方 Shell 脚本）
       const uploadResponse = await axios.post(endpoint, form, { 
         headers: form.getHeaders(),
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
-        validateStatus: (status) => status === 204 || status === 200 // 接受 204 和 200 状态码
+        validateStatus: (status) => status === 204 || status === 200, // 接受 204 和 200 状态码
+        onUploadProgress: (progressEvent: any) => {
+          if (progressEvent.loaded) {
+            uploadedSize = progressEvent.loaded;
+            const percentage = progressEvent.total 
+              ? Math.round((uploadedSize / progressEvent.total) * 100)
+              : Math.round((uploadedSize / totalSize) * 100);
+            const elapsed = (Date.now() - startTime) / 1000;
+            const speed = uploadedSize / elapsed / 1024 / 1024; // MB/s
+            const uploadedMB = (uploadedSize / 1024 / 1024).toFixed(2);
+            const totalMB = (totalSize / 1024 / 1024).toFixed(2);
+            
+            // 清除当前行并输出进度
+            process.stdout.write(`\r${chalk.cyan('⬆️  Progress:')} ${percentage}% | ${uploadedMB}/${totalMB} MB | ${speed.toFixed(2)} MB/s`);
+          }
+        }
       });
+
+      process.stdout.write('\n'); // 换行，结束进度条
 
       if (uploadResponse.status !== 204) {
         throw new Error(`Upload failed with status code: ${uploadResponse.status}`);
       }
 
-      spinner.text = "Waiting for PGYER to process build...";
+      this.log(chalk.green('✅ Upload complete!\n'));
+      const spinner2 = ora("Waiting for PGYER to process build...").start();
       let buildInfo = null;
 
       for (let i = 0; i < 60; i++) {
@@ -825,7 +855,7 @@ ${ignoreEntry}\n`);
         }
       }
 
-      spinner.stop();
+      spinner2.stop();
 
       if (!buildInfo) this.error("Timeout waiting for build to finish");
 

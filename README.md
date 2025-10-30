@@ -20,7 +20,7 @@ $ npm install -g pgyer-upload
 $ pgyer-upload COMMAND
 running command...
 $ pgyer-upload (--version)
-pgyer-upload/0.0.0 darwin-arm64 node-v22.15.0
+pgyer-upload/0.0.1 darwin-arm64 node-v22.15.0
 $ pgyer-upload --help [COMMAND]
 USAGE
   $ pgyer-upload COMMAND
@@ -378,5 +378,5 @@ DESCRIPTION
   Upload iOS / Android / HarmonyOS builds to PGYER
 ```
 
-_See code: [src/commands/upload.ts](https://github.com/cli/pgyer-upload/blob/v0.0.0/src/commands/upload.ts)_
+_See code: [src/commands/upload.ts](https://github.com/cli/pgyer-upload/blob/v0.0.1/src/commands/upload.ts)_
 <!-- commandsstop -->
