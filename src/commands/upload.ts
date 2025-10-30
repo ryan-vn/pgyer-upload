@@ -19,6 +19,9 @@ interface UploadConfig {
   password?: string;
   desc?: string;
   json?: boolean;
+  before_command?: string;
+  last_env?: 'development' | 'uat' | 'production';
+  last_notes?: string;
   email?: {
     enabled?: boolean;
     host: string;
@@ -260,6 +263,35 @@ export default class Upload extends Command {
       }
     } catch (error) {
       this.log(chalk.red(`❌ Error saving config: ${error}`));
+    }
+  }
+
+  private clearLastEnvAndNotes(): void {
+    const configPath = path.join(process.cwd(), 'upload_config.json');
+    if (!fs.existsSync(configPath)) return;
+    
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as UploadConfig;
+      delete config.last_env;
+      delete config.last_notes;
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+      this.log(chalk.gray('🧹 Cleared last environment and notes from config'));
+    } catch (error) {
+      // 不影响主流程
+    }
+  }
+
+  private saveLastEnvAndNotes(env?: string, notes?: string): void {
+    const configPath = path.join(process.cwd(), 'upload_config.json');
+    if (!fs.existsSync(configPath)) return;
+    
+    try {
+      const config = JSON.parse(fs.readFileSync(configPath, 'utf8')) as UploadConfig;
+      if (env) config.last_env = env as any;
+      if (notes) config.last_notes = notes;
+      fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
+    } catch (error) {
+      // 不影响主流程
     }
   }
 
@@ -638,12 +670,13 @@ ${ignoreEntry}\n`);
             {name: 'uat', value: 'uat'},
             {name: 'production', value: 'production'},
           ],
-          default: 'development',
+          default: uploadConfig.last_env || 'development',
         },
         {
           type: 'input',
           name: 'notes',
           message: 'Release notes / description:',
+          default: uploadConfig.last_notes || '',
           validate: (v:string)=> v && v.trim().length>0 ? true : 'Please enter a description',
         },
       ]);
@@ -713,6 +746,21 @@ ${ignoreEntry}\n`);
 
     if (!fs.existsSync(file)) {
       this.error(`File does not exist: ${file}`);
+    }
+
+    // Execute before_command if configured
+    if (uploadConfig.before_command) {
+      this.log(chalk.blue(`\n🔧 Executing before_command: ${uploadConfig.before_command}`));
+      try {
+        execSync(uploadConfig.before_command, { stdio: 'inherit', cwd: process.cwd() });
+        this.log(chalk.green('✅ before_command executed successfully\n'));
+      } catch (error: any) {
+        this.log(chalk.red(`\n❌ before_command failed: ${error.message || error}`));
+        // Save current env/notes for next run
+        this.saveLastEnvAndNotes(envLabel, notes);
+        this.log(chalk.yellow('💾 Saved environment and notes for next run'));
+        return;
+      }
     }
 
     const spinner = ora("Requesting upload token...").start();
@@ -806,8 +854,14 @@ ${ignoreEntry}\n`);
         }
       }
 
+      // Clear last_env and last_notes after successful upload
+      this.clearLastEnvAndNotes();
+
     } catch (err: any) {
       spinner.fail("Upload failed");
+      // Save current env/notes for next run if upload failed
+      this.saveLastEnvAndNotes(envLabel, notes);
+      this.log(chalk.yellow('💾 Saved environment and notes for next run'));
       this.error(err.message);
     }
   }

@@ -1,22 +1,26 @@
 {
-  "pgyapikey": "your_pgyer_api_key_here",
-  "filepath": "path/to/your/app.apk",
+  "pgyapikey": "your_api_key_here",
+  "filepath": "build/app/outputs/flutter-apk/app-release.apk",
   "type": "1",
-  "password": "",
   "desc": "Uploaded via pgyer-upload CLI",
   "json": false,
+  "before_command": "npm run build",
+  "last_env": "development",
+  "last_notes": "Fixed login bug",
   "email": {
-    "enabled": false,
+    "enabled": true,
     "host": "smtp.example.com",
     "port": 465,
     "secure": true,
-    "user": "no-reply@example.com",
+    "user": "your_email@example.com",
     "pass": "your_password",
-    "from": "PGYER Bot <no-reply@example.com>",
-    "to": ["dev1@example.com", "dev2@example.com"],
-    "cc": ["pm@example.com"],
-    "subject": "New Build Uploaded",
-    "text": "A new build is ready for installation.",
-    "html": "<p>A new build is ready: <a href='{{installUrl}}'>Install</a></p><p>Version Hash: {{gitHash}}</p><p>Build Key: {{buildKey}}</p><p><img src='{{qrCodeUrl}}' alt='QR Code'/></p>"
+    "from": "PGYER Bot <noreply@example.com>",
+    "to": [
+      "team@example.com"
+    ],
+    "cc": [
+      "manager@example.com"
+    ],
+    "subject": "New Build Uploaded"
   }
 }
