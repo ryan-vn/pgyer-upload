@@ -67,6 +67,7 @@ _See code: [@oclif/plugin-help](https://github.com/oclif/plugin-help/blob/v6.2.3
 List installed plugins.
 
 ```
+
 USAGE
   $ pgyer-upload plugins [--json] [--core]
 
