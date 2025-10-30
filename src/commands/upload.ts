@@ -53,6 +53,8 @@ export default class Upload extends Command {
     auto: Flags.boolean({ char: "a", description: "Auto-detect build files" })
   };
 
+  private justCreatedUploadConfig: boolean = false;
+
   private loadConfig(configPath?: string): void {
     const finalConfigPath = this.getConfigPath(configPath);
     
@@ -248,8 +250,14 @@ export default class Upload extends Command {
     const configPath = path.join(process.cwd(), 'upload_config.json');
     
     try {
+      const existed = fs.existsSync(configPath);
       fs.writeFileSync(configPath, JSON.stringify(config, null, 2));
       this.log(chalk.green(`✅ Configuration saved to: ${configPath}`));
+      // ensure .gitignore ignores upload_config.json
+      this.ensureGitignoreForUploadConfig();
+      if (!existed) {
+        this.justCreatedUploadConfig = true;
+      }
     } catch (error) {
       this.log(chalk.red(`❌ Error saving config: ${error}`));
     }
@@ -270,22 +278,21 @@ export default class Upload extends Command {
 
     const subject = emailCfg.subject || `PGYER Upload: ${buildInfo?.buildName || "Build"}`;
     const installUrl = buildInfo?.buildShortcutUrl ? `https://www.pgyer.com/${buildInfo.buildShortcutUrl}` : "";
-    const gitHash = this.getGitHash();
-    const buildKey = buildInfo?.buildKey || "";
-    const buildKeyOnly = typeof buildKey === 'string' ? buildKey.replace(/\.[^.]+$/, '') : '';
-    const qrCodeUrl = buildKeyOnly ? `https://www.pgyer.com/app/qrcode/${buildKeyOnly}` : "";
+    const envLabel = buildInfo?.__env as string | undefined;
+    const notes = buildInfo?.__notes as string | undefined;
 
-    const defaultText = `Upload Successful\n\nApp: ${buildInfo?.buildName || "-"}\nVersion: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})\nInstall: ${installUrl}\nVersion Hash: ${gitHash || '-'}\nBuild Key: ${buildKey || '-'}`;
+    const defaultText = `Upload Successful\n\nApp: ${buildInfo?.buildName || "-"}\nVersion: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})\nEnvironment: ${envLabel || '-'}\nNotes: ${notes || '-'}\nInstall: ${installUrl}\nVersion Hash: ${buildInfo?.buildKey || '-'}\nBuild Key: ${buildInfo?.buildKey || '-'}`;
 
-    const variables = {installUrl, gitHash, buildKey, qrCodeUrl, appName: buildInfo?.buildName || '-', version: buildInfo?.buildVersion || '-', buildNo: buildInfo?.buildVersionNo || '-' } as Record<string,string>;
+    const variables = {installUrl, env: envLabel || '', notes: notes || '', desc: buildInfo?.__desc || '', appName: buildInfo?.buildName || '-', version: buildInfo?.buildVersion || '-', buildNo: buildInfo?.buildVersionNo || '-' } as Record<string,string>;
     const text = emailCfg.text ? this.interpolate(emailCfg.text, variables) : defaultText;
     const html = emailCfg.html 
       ? this.interpolate(emailCfg.html, variables)
-      : `<p>Upload Successful</p>
-         <p>App: <b>${buildInfo?.buildName || "-"}</b></p>
+      : `<p>App: <b>${buildInfo?.buildName || "-"}</b></p>
          <p>Version: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})</p>
+         ${envLabel ? `<p>Environment: ${envLabel}</p>` : ''}
+         ${notes ? `<p>Notes: ${notes}</p>` : ''}
          <p>Install: <a href="${installUrl}">${installUrl}</a></p>
-         ${qrCodeUrl ? `<p>QR Code:<br/><img src="${qrCodeUrl}" alt="QR"/></p>` : ''}`;
+         ${buildInfo?.buildKey ? `<p>Version Hash: ${buildInfo.buildKey}</p>` : ''}`;
 
     await transporter.sendMail({
       from: emailCfg.from,
@@ -301,15 +308,6 @@ export default class Upload extends Command {
 
   private interpolate(template: string, vars: Record<string,string>): string {
     return Object.entries(vars).reduce((acc,[k,v])=>acc.replace(new RegExp(`\\{\\{${k}\\}\\}`,'g'), v || ''), template);
-  }
-
-  private getGitHash(): string | null {
-    try {
-      const out = execSync('git rev-parse --short=8 HEAD', {cwd: process.cwd(), stdio: ['ignore','pipe','ignore']}).toString().trim();
-      return out || null;
-    } catch {
-      return null;
-    }
   }
 
   private getConfigPath(configPath?: string): string {
@@ -419,6 +417,41 @@ export default class Upload extends Command {
 
       fs.writeFileSync(uploadJsonPath, JSON.stringify(uploadJson, null, 2));
       this.log(chalk.green(`✅ Email config created: ${uploadJsonPath}`));
+      // ensure .gitignore ignores upload_config.json
+      this.ensureGitignoreForUploadConfig();
+      this.justCreatedUploadConfig = true;
+      this.log(chalk.blue('\nℹ️  初始化配置文件已创建。'));
+      this.log(chalk.gray('接下来请再次运行上传命令以执行上传，例如:'));
+      this.log(chalk.gray('  pgyer-upload upload'));
+    }
+  }
+
+  private ensureGitignoreForUploadConfig(): void {
+    try {
+      const cwd = process.cwd();
+      const giPath = path.join(cwd, '.gitignore');
+      const ignoreEntry = 'upload_config.json';
+
+      if (!fs.existsSync(giPath)) {
+        fs.writeFileSync(giPath, `# pgyer-upload
+${ignoreEntry}\n`);
+        this.log(chalk.gray(`🛡️  Created .gitignore with ${ignoreEntry}`));
+        return;
+      }
+
+      const content = fs.readFileSync(giPath, 'utf8');
+      // quick check for existing entry (exact match in any line)
+      const lines = content.split(/\r?\n/);
+      const has = lines.some(l => l.trim() === ignoreEntry);
+      if (has) return;
+
+      const needsNewline = content.length > 0 && !content.endsWith('\n');
+      const updated = needsNewline ? `${content}\n${ignoreEntry}\n` : `${content}${ignoreEntry}\n`;
+      fs.writeFileSync(giPath, updated);
+      this.log(chalk.gray(`🛡️  Added ${ignoreEntry} to .gitignore`));
+    } catch (e) {
+      // Do not fail the command if .gitignore cannot be updated
+      this.log(chalk.yellow(`⚠️  Could not update .gitignore: ${e}`));
     }
   }
 
@@ -579,6 +612,44 @@ export default class Upload extends Command {
     // 如果没有配置文件，提供交互式输入
     if (!uploadConfig) {
       uploadConfig = await this.promptForConfig();
+      if (this.justCreatedUploadConfig) {
+        this.log(chalk.blue('\nℹ️  初始化配置文件已创建。'));
+        this.log(chalk.gray('接下来请再次运行上传命令以执行上传，例如:'));
+        this.log(chalk.gray('  pgyer-upload upload'));
+        return;
+      }
+    }
+
+    const hasUploadConfig = fs.existsSync(path.join(process.cwd(), 'upload_config.json'));
+
+    let envLabel: 'development' | 'uat' | 'production' | undefined;
+    let notes: string | undefined;
+    let descFromPrompt: string | undefined;
+
+    // always prompt if config exists and no --desc provided
+    if (hasUploadConfig && !flags.desc) {
+      const ans = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'env',
+          message: 'Select deployment environment:',
+          choices: [
+            {name: 'development', value: 'development'},
+            {name: 'uat', value: 'uat'},
+            {name: 'production', value: 'production'},
+          ],
+          default: 'development',
+        },
+        {
+          type: 'input',
+          name: 'notes',
+          message: 'Release notes / description:',
+          validate: (v:string)=> v && v.trim().length>0 ? true : 'Please enter a description',
+        },
+      ]);
+      envLabel = ans.env;
+      notes = ans.notes;
+      descFromPrompt = `[${envLabel}] ${notes}`;
     }
 
     // 获取参数（优先级：命令行 > upload_config.json > 环境变量）
@@ -586,7 +657,33 @@ export default class Upload extends Command {
     const file = args.file || uploadConfig.filepath || (flags.auto ? await this.autoDetectBuildFile() : undefined) || process.env.PGYER_BUILD_PATH;
     const type = flags.type || uploadConfig.type || process.env.PGYER_DEFAULT_TYPE;
     const password = flags.password || uploadConfig.password || process.env.PGYER_DEFAULT_PASSWORD;
-    const desc = flags.desc || uploadConfig.desc || process.env.PGYER_DEFAULT_DESC;
+    let desc = descFromPrompt || flags.desc || uploadConfig.desc || process.env.PGYER_DEFAULT_DESC;
+
+    // Prompt for environment and description when not provided via flags/config
+    if (!desc) {
+      const ans = await inquirer.prompt([
+        {
+          type: 'list',
+          name: 'env',
+          message: 'Select deployment environment:',
+          choices: [
+            {name: 'development', value: 'development'},
+            {name: 'uat', value: 'uat'},
+            {name: 'production', value: 'production'},
+          ],
+          default: 'development',
+        },
+        {
+          type: 'input',
+          name: 'notes',
+          message: 'Release notes / description:',
+          validate: (v:string)=> v && v.trim().length>0 ? true : 'Please enter a description',
+        },
+      ]);
+      envLabel = ans.env;
+      notes = ans.notes;
+      desc = `[${envLabel}] ${notes}`;
+    }
     const json = flags.json || uploadConfig.json || false;
     if (!apiKey) {
       this.log(chalk.red("\n❌ Missing API Key"));
@@ -684,15 +781,14 @@ export default class Upload extends Command {
 
       if (!buildInfo) this.error("Timeout waiting for build to finish");
 
-      const gitHash = this.getGitHash();
       const buildKey = buildInfo?.buildKey || cosKey;
-      const buildKeyOnly = typeof buildKey === 'string' ? buildKey.replace(/\.[^.]+$/, '') : '';
       const installLink = `https://www.pgyer.com/${buildInfo.buildShortcutUrl}`;
-      const qrCodeUrl = buildKeyOnly ? `https://www.pgyer.com/app/qrcode/${buildKeyOnly}` : '';
+      const qrCodeUrl = buildKey ? `https://www.pgyer.com/app/qrcode/${buildKey.replace(/\.[^.]+$/, '')}` : '';
 
       this.log(chalk.green("\n✅ Upload Successful!"));
       this.log(chalk.blue(`🔗 Install Link: ${installLink}`));
-      if (gitHash) this.log(chalk.magenta(`🔗 Version Hash: ${gitHash}`));
+      if (envLabel) this.log(chalk.cyan(`🌎 Environment: ${envLabel}`));
+      if (notes) this.log(chalk.cyan(`📝 Notes: ${notes}`));
       if (buildKey) this.log(chalk.gray(`📦 Build Key: ${buildKey}`));
       if (qrCodeUrl) this.log(chalk.blue(`📷 QR Code URL: ${qrCodeUrl}`));
       this.log("");
@@ -704,7 +800,7 @@ export default class Upload extends Command {
       // Optional email notification
       if (uploadConfig.email?.enabled) {
         try {
-          await this.sendEmailNotification(uploadConfig.email, {...buildInfo, buildKey});
+          await this.sendEmailNotification(uploadConfig.email, {...buildInfo, buildKey, __env: envLabel, __notes: notes, __desc: desc});
         } catch (e: any) {
           this.log(chalk.yellow(`⚠️ Email send failed: ${e.message || e}`));
         }

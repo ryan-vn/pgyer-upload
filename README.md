@@ -29,8 +29,6 @@ USAGE
 <!-- usagestop -->
 # Commands
 <!-- commands -->
-* [`pgyer-upload hello PERSON`](#pgyer-upload-hello-person)
-* [`pgyer-upload hello world`](#pgyer-upload-hello-world)
 * [`pgyer-upload help [COMMAND]`](#pgyer-upload-help-command)
 * [`pgyer-upload plugins`](#pgyer-upload-plugins)
 * [`pgyer-upload plugins add PLUGIN`](#pgyer-upload-plugins-add-plugin)
@@ -42,48 +40,7 @@ USAGE
 * [`pgyer-upload plugins uninstall [PLUGIN]`](#pgyer-upload-plugins-uninstall-plugin)
 * [`pgyer-upload plugins unlink [PLUGIN]`](#pgyer-upload-plugins-unlink-plugin)
 * [`pgyer-upload plugins update`](#pgyer-upload-plugins-update)
-
-## `pgyer-upload hello PERSON`
-
-Say hello
-
-```
-USAGE
-  $ pgyer-upload hello PERSON -f <value>
-
-ARGUMENTS
-  PERSON  Person to say hello to
-
-FLAGS
-  -f, --from=<value>  (required) Who is saying hello
-
-DESCRIPTION
-  Say hello
-
-EXAMPLES
-  $ pgyer-upload hello friend --from oclif
-  hello friend from oclif! (./src/commands/hello/index.ts)
-```
-
-_See code: [src/commands/hello/index.ts](https://github.com/cli/pgyer-upload/blob/v0.0.0/src/commands/hello/index.ts)_
-
-## `pgyer-upload hello world`
-
-Say hello world
-
-```
-USAGE
-  $ pgyer-upload hello world
-
-DESCRIPTION
-  Say hello world
-
-EXAMPLES
-  $ pgyer-upload hello world
-  hello world! (./src/commands/hello/world.ts)
-```
-
-_See code: [src/commands/hello/world.ts](https://github.com/cli/pgyer-upload/blob/v0.0.0/src/commands/hello/world.ts)_
+* [`pgyer-upload upload [FILE]`](#pgyer-upload-upload-file)
 
 ## `pgyer-upload help [COMMAND]`
 
@@ -394,4 +351,32 @@ DESCRIPTION
 ```
 
 _See code: [@oclif/plugin-plugins](https://github.com/oclif/plugin-plugins/blob/v5.4.51/src/commands/plugins/update.ts)_
+
+## `pgyer-upload upload [FILE]`
+
+Upload iOS / Android / HarmonyOS builds to PGYER
+
+```
+USAGE
+  $ pgyer-upload upload [FILE] [-k <value>] [-t <value>] [-p <value>] [-d <value>] [-j] [-c <value>] [-i]
+    [-a]
+
+ARGUMENTS
+  [FILE]  ipa/apk/hap file path (optional if configured)
+
+FLAGS
+  -a, --auto              Auto-detect build files
+  -c, --config=<value>    Path to config file (.env)
+  -d, --desc=<value>      Build update description
+  -i, --init              Initialize project configuration
+  -j, --json              Output full JSON response
+  -k, --apiKey=<value>    PGYER API Key
+  -p, --password=<value>  Install password if type=2
+  -t, --type=<value>      Install type (1=public,2=password,3=invite)
+
+DESCRIPTION
+  Upload iOS / Android / HarmonyOS builds to PGYER
+```
+
+_See code: [src/commands/upload.ts](https://github.com/cli/pgyer-upload/blob/v0.0.0/src/commands/upload.ts)_
 <!-- commandsstop -->
