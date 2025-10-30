@@ -40,7 +40,6 @@ USAGE
 * [`pgyer-upload plugins uninstall [PLUGIN]`](#pgyer-upload-plugins-uninstall-plugin)
 * [`pgyer-upload plugins unlink [PLUGIN]`](#pgyer-upload-plugins-unlink-plugin)
 * [`pgyer-upload plugins update`](#pgyer-upload-plugins-update)
-* [`pgyer-upload upload [FILE]`](#pgyer-upload-upload-file)
 
 ## `pgyer-upload help [COMMAND]`
 
