@@ -803,38 +803,18 @@ ${ignoreEntry}\n`);
       form.append("x-cos-meta-file-name", file.split("/").pop());
       form.append("file", fs.createReadStream(file));
 
-      // 获取文件大小用于进度计算
+      // 获取文件大小用于上传后提示
       const fileStats = fs.statSync(file);
       const totalSize = fileStats.size;
-      let uploadedSize = 0;
-      const startTime = Date.now();
+      this.log(chalk.blue(`📤 Uploading ${path.basename(file)} (${(totalSize / 1024 / 1024).toFixed(2)} MB)...`));
 
-      this.log(chalk.blue(`📤 Uploading ${path.basename(file)} (${(totalSize / 1024 / 1024).toFixed(2)} MB)...\n`));
-
-      // 使用正确的 COS 上传方式（参考官方 Shell 脚本）
-      const uploadResponse = await axios.post(endpoint, form, { 
+      // 上传时不显示进度，直接等待上传完成
+      const uploadResponse = await axios.post(endpoint, form, {
         headers: form.getHeaders(),
         maxContentLength: Infinity,
         maxBodyLength: Infinity,
-        validateStatus: (status) => status === 204 || status === 200, // 接受 204 和 200 状态码
-        onUploadProgress: (progressEvent: any) => {
-          if (progressEvent.loaded) {
-            uploadedSize = progressEvent.loaded;
-            const percentage = progressEvent.total 
-              ? Math.round((uploadedSize / progressEvent.total) * 100)
-              : Math.round((uploadedSize / totalSize) * 100);
-            const elapsed = (Date.now() - startTime) / 1000;
-            const speed = uploadedSize / elapsed / 1024 / 1024; // MB/s
-            const uploadedMB = (uploadedSize / 1024 / 1024).toFixed(2);
-            const totalMB = (totalSize / 1024 / 1024).toFixed(2);
-            
-            // 清除当前行并输出进度
-            process.stdout.write(`\r${chalk.cyan('⬆️  Progress:')} ${percentage}% | ${uploadedMB}/${totalMB} MB | ${speed.toFixed(2)} MB/s`);
-          }
-        }
+        validateStatus: (status) => status === 204 || status === 200 // 接受 204 和 200 状态码
       });
-
-      process.stdout.write('\n'); // 换行，结束进度条
 
       if (uploadResponse.status !== 204) {
         throw new Error(`Upload failed with status code: ${uploadResponse.status}`);

@@ -1,8 +1,8 @@
 {
   "name": "pgyer-upload",
   "description": "Upload iOS / Android / HarmonyOS builds to PGYER",
-  "version": "0.0.1",
-  "author": "vincent",
+  "version": "0.0.2",
+  "author": "vincet",
   "bin": {
     "pgyer-upload": "./bin/run.js"
   },
