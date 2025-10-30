@@ -17,6 +17,6 @@
     "cc": ["pm@example.com"],
     "subject": "New Build Uploaded",
     "text": "A new build is ready for installation.",
-    "html": "<p>A new build is ready: <a href='{{installUrl}}'>Install</a></p>"
+    "html": "<p>A new build is ready: <a href='{{installUrl}}'>Install</a></p><p>Version Hash: {{gitHash}}</p><p>Build Key: {{buildKey}}</p><p><img src='{{qrCodeUrl}}' alt='QR Code'/></p>"
   }
 }

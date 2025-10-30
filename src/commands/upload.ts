@@ -8,6 +8,7 @@ import chalk from "chalk";
 import dotenv from "dotenv";
 import inquirer from "inquirer";
 import nodemailer from "nodemailer";
+import {execSync} from "node:child_process";
 
 const API_BASE_URL = "http://api.pgyer.com/apiv2";
 
@@ -269,9 +270,22 @@ export default class Upload extends Command {
 
     const subject = emailCfg.subject || `PGYER Upload: ${buildInfo?.buildName || "Build"}`;
     const installUrl = buildInfo?.buildShortcutUrl ? `https://www.pgyer.com/${buildInfo.buildShortcutUrl}` : "";
-    const defaultText = `Upload Successful\n\nApp: ${buildInfo?.buildName || "-"}\nVersion: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})\nInstall: ${installUrl}`;
-    const text = emailCfg.text || defaultText;
-    const html = emailCfg.html || `<p>Upload Successful</p><p>App: <b>${buildInfo?.buildName || "-"}</b></p><p>Version: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})</p><p>Install: <a href="${installUrl}">${installUrl}</a></p>`;
+    const gitHash = this.getGitHash();
+    const buildKey = buildInfo?.buildKey || "";
+    const buildKeyOnly = typeof buildKey === 'string' ? buildKey.replace(/\.[^.]+$/, '') : '';
+    const qrCodeUrl = buildKeyOnly ? `https://www.pgyer.com/app/qrcode/${buildKeyOnly}` : "";
+
+    const defaultText = `Upload Successful\n\nApp: ${buildInfo?.buildName || "-"}\nVersion: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})\nInstall: ${installUrl}\nVersion Hash: ${gitHash || '-'}\nBuild Key: ${buildKey || '-'}`;
+
+    const variables = {installUrl, gitHash, buildKey, qrCodeUrl, appName: buildInfo?.buildName || '-', version: buildInfo?.buildVersion || '-', buildNo: buildInfo?.buildVersionNo || '-' } as Record<string,string>;
+    const text = emailCfg.text ? this.interpolate(emailCfg.text, variables) : defaultText;
+    const html = emailCfg.html 
+      ? this.interpolate(emailCfg.html, variables)
+      : `<p>Upload Successful</p>
+         <p>App: <b>${buildInfo?.buildName || "-"}</b></p>
+         <p>Version: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})</p>
+         <p>Install: <a href="${installUrl}">${installUrl}</a></p>
+         ${qrCodeUrl ? `<p>QR Code:<br/><img src="${qrCodeUrl}" alt="QR"/></p>` : ''}`;
 
     await transporter.sendMail({
       from: emailCfg.from,
@@ -283,6 +297,19 @@ export default class Upload extends Command {
     });
 
     this.log(chalk.green("📧 Email notification sent"));
+  }
+
+  private interpolate(template: string, vars: Record<string,string>): string {
+    return Object.entries(vars).reduce((acc,[k,v])=>acc.replace(new RegExp(`\\{\\{${k}\\}\\}`,'g'), v || ''), template);
+  }
+
+  private getGitHash(): string | null {
+    try {
+      const out = execSync('git rev-parse --short=8 HEAD', {cwd: process.cwd(), stdio: ['ignore','pipe','ignore']}).toString().trim();
+      return out || null;
+    } catch {
+      return null;
+    }
   }
 
   private getConfigPath(configPath?: string): string {
@@ -657,8 +684,18 @@ export default class Upload extends Command {
 
       if (!buildInfo) this.error("Timeout waiting for build to finish");
 
+      const gitHash = this.getGitHash();
+      const buildKey = buildInfo?.buildKey || cosKey;
+      const buildKeyOnly = typeof buildKey === 'string' ? buildKey.replace(/\.[^.]+$/, '') : '';
+      const installLink = `https://www.pgyer.com/${buildInfo.buildShortcutUrl}`;
+      const qrCodeUrl = buildKeyOnly ? `https://www.pgyer.com/app/qrcode/${buildKeyOnly}` : '';
+
       this.log(chalk.green("\n✅ Upload Successful!"));
-      this.log(chalk.blue(`🔗 Install Link: https://www.pgyer.com/${buildInfo.buildShortcutUrl}\n`));
+      this.log(chalk.blue(`🔗 Install Link: ${installLink}`));
+      if (gitHash) this.log(chalk.magenta(`🔗 Version Hash: ${gitHash}`));
+      if (buildKey) this.log(chalk.gray(`📦 Build Key: ${buildKey}`));
+      if (qrCodeUrl) this.log(chalk.blue(`📷 QR Code URL: ${qrCodeUrl}`));
+      this.log("");
 
       if (json) {
         this.log(JSON.stringify(buildInfo, null, 2));
@@ -667,7 +704,7 @@ export default class Upload extends Command {
       // Optional email notification
       if (uploadConfig.email?.enabled) {
         try {
-          await this.sendEmailNotification(uploadConfig.email, buildInfo);
+          await this.sendEmailNotification(uploadConfig.email, {...buildInfo, buildKey});
         } catch (e: any) {
           this.log(chalk.yellow(`⚠️ Email send failed: ${e.message || e}`));
         }
