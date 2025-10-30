@@ -1,0 +1,8 @@
+{
+  "pgyapikey": "your_pgyer_api_key_here",
+  "filepath": "path/to/your/app.apk",
+  "type": "1",
+  "password": "",
+  "desc": "Uploaded via pgyer-upload CLI",
+  "json": false
+}
