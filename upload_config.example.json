@@ -7,6 +7,7 @@
   "before_command": "npm run build",
   "last_env": "development",
   "last_notes": "Fixed login bug",
+  "notification_channel": "both",
   "email": {
     "enabled": true,
     "host": "smtp.example.com",
@@ -22,5 +23,9 @@
       "manager@example.com"
     ],
     "subject": "New Build Uploaded"
+  },
+  "feishu": {
+    "enabled": true,
+    "webhook": "https://open.feishu.cn/open-apis/bot/v2/hook/your-webhook-id"
   }
 }

@@ -8,9 +8,13 @@ import chalk from "chalk";
 import dotenv from "dotenv";
 import inquirer from "inquirer";
 import nodemailer from "nodemailer";
-import {execSync} from "node:child_process";
+import { execSync, spawn } from "node:child_process";
 
 const API_BASE_URL = "http://api.pgyer.com/apiv2";
+
+type NotificationChannel = 'email' | 'feishu' | 'both';
+
+console.log('dfd')
 
 interface UploadConfig {
   pgyapikey: string;
@@ -22,6 +26,7 @@ interface UploadConfig {
   before_command?: string;
   last_env?: 'development' | 'uat' | 'production';
   last_notes?: string;
+  notification_channel?: NotificationChannel;
   email?: {
     enabled?: boolean;
     host: string;
@@ -36,7 +41,12 @@ interface UploadConfig {
     text?: string;
     html?: string;
   };
+  feishu?: {
+    enabled?: boolean;
+    webhook: string;
+  };
 }
+
 
 export default class Upload extends Command {
   static description = "Upload iOS / Android / HarmonyOS builds to PGYER";
@@ -53,7 +63,8 @@ export default class Upload extends Command {
     json: Flags.boolean({ char: "j", description: "Output full JSON response" }),
     config: Flags.string({ char: "c", description: "Path to config file (.env)" }),
     init: Flags.boolean({ char: "i", description: "Initialize project configuration" }),
-    auto: Flags.boolean({ char: "a", description: "Auto-detect build files" })
+    auto: Flags.boolean({ char: "a", description: "Auto-detect build files" }),
+    useCurl: Flags.boolean({ char: "b", description: "Use curl for upload with progress bar (requires curl installed)" })
   };
 
   private justCreatedUploadConfig: boolean = false;
@@ -128,19 +139,25 @@ export default class Upload extends Command {
         message: 'Build description:',
         default: 'Uploaded via pgyer-upload CLI'
       },
-      // Email enable switch
+      // Notification channel selection
       {
-        type: 'confirm',
-        name: 'emailEnabled',
-        message: 'Enable email notification after upload?',
-        default: false,
+        type: 'list',
+        name: 'notificationChannel',
+        message: 'Select notification channel:',
+        choices: [
+          { name: 'Email only', value: 'email' },
+          { name: 'Feishu group only', value: 'feishu' },
+          { name: 'Both email and Feishu', value: 'both' },
+          { name: 'None', value: 'none' }
+        ],
+        default: 'none',
       },
       // Email settings (conditional)
       {
         type: 'input',
         name: 'emailHost',
         message: 'SMTP host (e.g. smtp.example.com):',
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
         validate: (v:string) => v ? true : 'Required',
       },
       {
@@ -148,54 +165,70 @@ export default class Upload extends Command {
         name: 'emailPort',
         message: 'SMTP port (e.g. 465):',
         default: 465,
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
       },
       {
         type: 'confirm',
         name: 'emailSecure',
         message: 'Use TLS (secure)?',
         default: true,
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
       },
       {
         type: 'input',
         name: 'emailUser',
         message: 'SMTP user (leave empty if not required):',
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
       },
       {
         type: 'password',
         name: 'emailPass',
         message: 'SMTP password (leave empty if not required):',
         mask: '*',
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
       },
       {
         type: 'input',
         name: 'emailFrom',
         message: 'From (e.g. PGYER Bot <no-reply@example.com>):',
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
         validate: (v:string) => v ? true : 'Required',
       },
       {
         type: 'input',
         name: 'emailTo',
         message: 'To (comma separated emails):',
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
         validate: (v:string) => v ? true : 'Required',
       },
       {
         type: 'input',
         name: 'emailCc',
         message: 'CC (optional, comma separated):',
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
       },
       {
         type: 'input',
         name: 'emailSubject',
         message: 'Email subject (optional):',
         default: 'New Build Uploaded',
-        when: (a:any) => a.emailEnabled,
+        when: (a:any) => a.notificationChannel === 'email' || a.notificationChannel === 'both',
+      },
+      // Feishu settings (conditional)
+      {
+        type: 'input',
+        name: 'feishuWebhook',
+        message: 'Feishu webhook URL:',
+        when: (a:any) => a.notificationChannel === 'feishu' || a.notificationChannel === 'both',
+        validate: (v:string) => {
+          if (!v || v.trim() === '') return 'Webhook URL is required';
+          try {
+            new URL(v);
+            return true;
+          } catch {
+            return 'Invalid webhook URL';
+          }
+        },
       },
       {
         type: 'confirm',
@@ -211,6 +244,8 @@ export default class Upload extends Command {
       }
     ]);
 
+    const notificationChannel = answers.notificationChannel === 'none' ? undefined : answers.notificationChannel as NotificationChannel;
+    
     const config: UploadConfig = {
       pgyapikey: answers.pgyapikey,
       filepath: answers.filepath,
@@ -218,7 +253,8 @@ export default class Upload extends Command {
       password: answers.password,
       desc: answers.desc,
       json: answers.json,
-      email: answers.emailEnabled
+      notification_channel: notificationChannel,
+      email: (notificationChannel === 'email' || notificationChannel === 'both')
         ? {
             enabled: true,
             host: answers.emailHost,
@@ -238,6 +274,12 @@ export default class Upload extends Command {
                   .filter(Boolean)
               : undefined,
             subject: answers.emailSubject,
+          }
+        : undefined,
+      feishu: (notificationChannel === 'feishu' || notificationChannel === 'both')
+        ? {
+            enabled: true,
+            webhook: answers.feishuWebhook,
           }
         : undefined,
     };
@@ -344,6 +386,91 @@ export default class Upload extends Command {
 
   private interpolate(template: string, vars: Record<string,string>): string {
     return Object.entries(vars).reduce((acc,[k,v])=>acc.replace(new RegExp(`\\{\\{${k}\\}\\}`,'g'), v || ''), template);
+  }
+
+  private async sendFeishuNotification(feishuCfg: UploadConfig["feishu"], buildInfo: any): Promise<void> {
+    if (!feishuCfg || feishuCfg.enabled === false || !feishuCfg.webhook) return;
+
+    const installUrl = buildInfo?.buildShortcutUrl ? `https://www.pgyer.com/${buildInfo.buildShortcutUrl}` : "";
+    const buildKey = buildInfo?.buildKey || "";
+    const buildKeyOnly = typeof buildKey === 'string' ? buildKey.replace(/\.[^.]+$/, '') : '';
+    const qrCodeUrl = buildKeyOnly ? `https://www.pgyer.com/app/qrcode/${buildKeyOnly}` : "";
+    const envLabel = buildInfo?.__env as string | undefined;
+    const notes = buildInfo?.__notes as string | undefined;
+
+    // 构建消息内容
+    const title = `📦 新版本构建上传成功`;
+    
+    // 构建文本内容
+    const textLines = [
+      `应用名称: ${buildInfo?.buildName || "-"}`,
+      `版本号: ${buildInfo?.buildVersion || "-"} (${buildInfo?.buildVersionNo || "-"})`,
+      ...(envLabel ? [`环境: ${envLabel}`] : []),
+      ...(notes ? [`更新说明: ${notes}`] : []),
+      `下载链接: ${installUrl}`,
+      ...(buildKey ? [`Build Key: ${buildKey}`] : []),
+      ...(qrCodeUrl ? [`扫码下载二维码: ${qrCodeUrl}`] : []),
+    ];
+    const textContent = textLines.join('\n');
+
+    // 使用 post 格式发送消息（更美观）
+    const postPayload = {
+      msg_type: 'post',
+      content: {
+        post: {
+          zh_cn: {
+            title: title,
+            content: [
+              [
+                {
+                  tag: 'text',
+                  text: textContent,
+                },
+              ],
+            ],
+          },
+        },
+      },
+    };
+
+    try {
+      const postResponse = await axios.post(feishuCfg.webhook, postPayload, {
+        headers: {
+          'Content-Type': 'application/json',
+        },
+      });
+
+      if (postResponse.data.code === 0) {
+        this.log(chalk.green("📱 Feishu notification sent"));
+      } else {
+        // 如果 post 格式失败，尝试使用文本格式
+        throw new Error(postResponse.data.msg || 'Failed to send Feishu notification');
+      }
+    } catch (error: any) {
+      // 如果 post 格式失败，尝试使用文本格式
+      const textPayload = {
+        msg_type: 'text',
+        content: {
+          text: `${title}\n\n${textContent}`,
+        },
+      };
+
+      try {
+        const textResponse = await axios.post(feishuCfg.webhook, textPayload, {
+          headers: {
+            'Content-Type': 'application/json',
+          },
+        });
+
+        if (textResponse.data.code === 0) {
+          this.log(chalk.green("📱 Feishu notification sent (text format)"));
+        } else {
+          throw new Error(textResponse.data.msg || 'Failed to send Feishu notification');
+        }
+      } catch (textError: any) {
+        throw new Error(`Feishu notification failed: ${textError.response?.data?.msg || textError.message || textError}`);
+      }
+    }
   }
 
   private getConfigPath(configPath?: string): string {
@@ -603,6 +730,133 @@ ${ignoreEntry}\n`);
     return files;
   }
 
+  /**
+   * Check if curl is available on the system
+   * @returns Promise that resolves to true if curl is available
+   */
+  private checkCurlAvailable(): Promise<boolean> {
+    return new Promise((resolve) => {
+      const curl = spawn('curl', ['--version'], {
+        stdio: 'ignore'
+      });
+
+      curl.on('close', (code) => {
+        resolve(code === 0);
+      });
+
+      curl.on('error', () => {
+        resolve(false);
+      });
+    });
+  }
+
+  /**
+   * Upload file using curl command with progress bar
+   * @param endpoint - Upload endpoint URL
+   * @param cosKey - COS key
+   * @param cosSignature - COS signature
+   * @param cosToken - COS security token
+   * @param filePath - Path to file to upload
+   * @returns Promise that resolves when upload completes
+   */
+  private uploadWithCurl(
+    endpoint: string,
+    cosKey: string,
+    cosSignature: string,
+    cosToken: string,
+    filePath: string
+  ): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const fileName = path.basename(filePath);
+      const absoluteFilePath = path.resolve(filePath);
+
+      // Build curl arguments similar to the bash script
+      const curlArgs = [
+        '-o', '/dev/null',           // Don't output response body
+        '-w', '%{http_code}',        // Output HTTP status code
+        '--progress-bar',            // Show progress bar
+        '--form-string', `key=${cosKey}`,
+        '--form-string', `signature=${cosSignature}`,
+        '--form-string', `x-cos-security-token=${cosToken}`,
+        '--form-string', `x-cos-meta-file-name=${fileName}`,
+        '-F', `file=@${absoluteFilePath}`,
+        endpoint
+      ];
+
+      this.log(chalk.blue(`📤 Uploading ${fileName} with curl...`));
+
+      const curl = spawn('curl', curlArgs, {
+        stdio: ['inherit', 'pipe', 'inherit'] // stdin: inherit, stdout: pipe (capture status), stderr: inherit (show progress)
+      });
+
+      let statusCode = '';
+
+      curl.stdout.on('data', (data) => {
+        statusCode += data.toString();
+      });
+
+      curl.on('close', (code) => {
+        if (code !== 0) {
+          reject(new Error(`curl process exited with code ${code}`));
+          return;
+        }
+
+        const httpStatus = parseInt(statusCode.trim(), 10);
+        if (httpStatus === 204 || httpStatus === 200) {
+          this.log(chalk.green('\n✅ Upload complete!\n'));
+          resolve();
+        } else {
+          reject(new Error(`Upload failed with HTTP status code: ${httpStatus}`));
+        }
+      });
+
+      curl.on('error', (err) => {
+        reject(new Error(`Failed to start curl: ${err.message}. Make sure curl is installed.`));
+      });
+    });
+  }
+
+  /**
+   * Upload file using axios (fallback when curl is not available)
+   * @param endpoint - Upload endpoint URL
+   * @param cosKey - COS key
+   * @param cosSignature - COS signature
+   * @param cosToken - COS security token
+   * @param filePath - Path to file to upload
+   * @returns Promise that resolves when upload completes
+   */
+  private async uploadWithAxios(
+    endpoint: string,
+    cosKey: string,
+    cosSignature: string,
+    cosToken: string,
+    filePath: string
+  ): Promise<void> {
+    const form = new FormData();
+    form.append("key", cosKey);
+    form.append("signature", cosSignature);
+    form.append("x-cos-security-token", cosToken);
+    form.append("x-cos-meta-file-name", path.basename(filePath));
+    form.append("file", fs.createReadStream(filePath));
+
+    const fileStats = fs.statSync(filePath);
+    const totalSize = fileStats.size;
+    this.log(chalk.blue(`📤 Uploading ${path.basename(filePath)} (${(totalSize / 1024 / 1024).toFixed(2)} MB)...`));
+
+    const uploadResponse = await axios.post(endpoint, form, {
+      headers: form.getHeaders(),
+      maxContentLength: Infinity,
+      maxBodyLength: Infinity,
+      validateStatus: (status) => status === 204 || status === 200
+    });
+
+    if (uploadResponse.status !== 204) {
+      throw new Error(`Upload failed with status code: ${uploadResponse.status}`);
+    }
+
+    this.log(chalk.green('✅ Upload complete!\n'));
+  }
+
   private async autoDetectBuildFile(): Promise<string | null> {
     const projectInfo = await this.detectProjectType();
     
@@ -796,31 +1050,17 @@ ${ignoreEntry}\n`);
         throw new Error("Invalid upload token response: missing COS fields");
       }
 
-      const form = new FormData();
-      form.append("key", cosKey);
-      form.append("signature", cosSignature);
-      form.append("x-cos-security-token", cosToken);
-      form.append("x-cos-meta-file-name", file.split("/").pop());
-      form.append("file", fs.createReadStream(file));
-
-      // 获取文件大小用于上传后提示
-      const fileStats = fs.statSync(file);
-      const totalSize = fileStats.size;
-      this.log(chalk.blue(`📤 Uploading ${path.basename(file)} (${(totalSize / 1024 / 1024).toFixed(2)} MB)...`));
-
-      // 上传时不显示进度，直接等待上传完成
-      const uploadResponse = await axios.post(endpoint, form, {
-        headers: form.getHeaders(),
-        maxContentLength: Infinity,
-        maxBodyLength: Infinity,
-        validateStatus: (status) => status === 204 || status === 200 // 接受 204 和 200 状态码
-      });
-
-      if (uploadResponse.status !== 204) {
-        throw new Error(`Upload failed with status code: ${uploadResponse.status}`);
+      // 默认使用 curl 上传（带进度条），如果 curl 不可用则降级到 axios
+      const curlAvailable = await this.checkCurlAvailable();
+      
+      if (curlAvailable) {
+        // 使用 curl 上传（带进度条）
+        await this.uploadWithCurl(endpoint, cosKey, cosSignature, cosToken, file);
+      } else {
+        // curl 不可用，降级到 axios
+        this.log(chalk.yellow('⚠️  curl not available, using fallback upload method (no progress bar)'));
+        await this.uploadWithAxios(endpoint, cosKey, cosSignature, cosToken, file);
       }
-
-      this.log(chalk.green('✅ Upload complete!\n'));
       const spinner2 = ora("Waiting for PGYER to process build...").start();
       let buildInfo = null;
 
@@ -855,12 +1095,30 @@ ${ignoreEntry}\n`);
         this.log(JSON.stringify(buildInfo, null, 2));
       }
 
-      // Optional email notification
-      if (uploadConfig.email?.enabled) {
-        try {
-          await this.sendEmailNotification(uploadConfig.email, {...buildInfo, buildKey, __env: envLabel, __notes: notes, __desc: desc});
-        } catch (e: any) {
-          this.log(chalk.yellow(`⚠️ Email send failed: ${e.message || e}`));
+      // Send notifications based on configured channel
+      const notificationChannel = uploadConfig.notification_channel || 
+        (uploadConfig.email?.enabled ? 'email' : undefined) ||
+        (uploadConfig.feishu?.enabled ? 'feishu' : undefined);
+
+      const buildInfoWithMeta = {...buildInfo, buildKey, __env: envLabel, __notes: notes, __desc: desc};
+
+      if (notificationChannel === 'email' || notificationChannel === 'both') {
+        if (uploadConfig.email?.enabled) {
+          try {
+            await this.sendEmailNotification(uploadConfig.email, buildInfoWithMeta);
+          } catch (e: any) {
+            this.log(chalk.yellow(`⚠️ Email send failed: ${e.message || e}`));
+          }
+        }
+      }
+
+      if (notificationChannel === 'feishu' || notificationChannel === 'both') {
+        if (uploadConfig.feishu?.enabled) {
+          try {
+            await this.sendFeishuNotification(uploadConfig.feishu, buildInfoWithMeta);
+          } catch (e: any) {
+            this.log(chalk.yellow(`⚠️ Feishu notification failed: ${e.message || e}`));
+          }
         }
       }
 
