@@ -14,7 +14,7 @@ const API_BASE_URL = "http://api.pgyer.com/apiv2";
 
 type NotificationChannel = 'email' | 'feishu' | 'both';
 
-console.log('dfd')
+console.log('欢迎使用自动上传工具、推送工具')
 
 interface UploadConfig {
   pgyapikey: string;
