@@ -60,6 +60,11 @@ export default class Upload extends Command {
     type: Flags.string({ char: "t", description: "Install type (1=public,2=password,3=invite)" }),
     password: Flags.string({ char: "p", description: "Install password if type=2" }),
     desc: Flags.string({ char: "d", description: "Build update description" }),
+    env: Flags.string({
+      description: "Deployment environment label",
+      options: ["development", "uat", "production"]
+    }),
+    notes: Flags.string({ description: "Release notes / description text" }),
     json: Flags.boolean({ char: "j", description: "Output full JSON response" }),
     config: Flags.string({ char: "c", description: "Path to config file (.env)" }),
     init: Flags.boolean({ char: "i", description: "Initialize project configuration" }),
@@ -912,12 +917,16 @@ ${ignoreEntry}\n`);
 
     const hasUploadConfig = fs.existsSync(path.join(process.cwd(), 'upload_config.json'));
 
-    let envLabel: 'development' | 'uat' | 'production' | undefined;
-    let notes: string | undefined;
+    let envLabel: 'development' | 'uat' | 'production' | undefined = flags.env as any;
+    let notes: string | undefined = flags.notes;
     let descFromPrompt: string | undefined;
 
+    if (envLabel && notes && !flags.desc) {
+      descFromPrompt = `[${envLabel}] ${notes}`;
+    }
+
     // always prompt if config exists and no --desc provided
-    if (hasUploadConfig && !flags.desc) {
+    if (hasUploadConfig && !flags.desc && !(envLabel && notes)) {
       const ans = await inquirer.prompt([
         {
           type: 'list',

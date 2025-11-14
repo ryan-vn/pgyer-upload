@@ -72,6 +72,7 @@ npx pgyer-upload upload
 - 安装类型
 - 推送通知配置（邮箱/飞书）
 - 是否保存配置
+- 部署环境与更新说明（若未通过命令行传入）
 
 ### 方式三：命令行参数
 
@@ -81,6 +82,16 @@ npx pgyer-upload upload app.apk \
   -t 1 \
   -p password \
   -d "版本描述"
+```
+
+也可以通过 `--env` 与 `--notes` 组合跳过环境/描述的交互输入：
+
+```bash
+npx pgyer-upload upload \
+  --env uat \
+  --notes "更新描述" \
+  -k your_api_key \
+  app.apk
 ```
 
 ### 方式四：环境变量
@@ -100,6 +111,8 @@ npx pgyer-upload upload
 | `--type` | `-t` | 安装类型：1=公开，2=密码，3=邀请 | `-t 1` |
 | `--password` | `-p` | 安装密码（type=2 时必需） | `-p 123456` |
 | `--desc` | `-d` | 构建更新描述 | `-d "修复bug"` |
+| `--env` | - | 部署环境标签（development/uat/production） | `--env uat` |
+| `--notes` | - | 发布说明文本，和 `--env` 搭配可跳过交互 | `--notes "更新描述"` |
 | `--json` | `-j` | 输出完整 JSON 响应 | `-j` |
 | `--config` | `-c` | 指定配置文件路径 | `-c .env` |
 | `--init` | `-i` | 初始化项目配置 | `-i` |
